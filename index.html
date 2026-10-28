@@ -36,7 +36,7 @@
   <div class="header-actions"><span class="status" id="save-status">● Enregistré localement</span><button class="btn btn-soft" data-action="open-settings" aria-label="Ouvrir les paramètres">🔧 Paramètres</button></div>
  </div>
  <nav class="container nav" aria-label="Navigation principale">
-  <button class="tab active" data-tab="week">📅 Ma semaine</button><button class="tab" data-tab="recipes">📖 Mes recettes</button><button class="tab" data-tab="shopping">🛒 Ma liste de courses</button><button class="tab" data-tab="history">🥕 Ingrédients</button><button class="tab" data-tab="suggestions">✨ Suggestions</button>
+  <button class="tab active" data-tab="week">📅 Ma semaine</button><button class="tab" data-tab="recipes">📖 Mes recettes</button><button class="tab" data-tab="shopping">🛒 Ma liste de courses</button><button class="tab" data-tab="freezer">❄️ Mon congélateur</button><button class="tab" data-tab="history">🥕 Ingrédients</button><button class="tab" data-tab="suggestions">✨ Suggestions</button>
  </nav>
 </header>
 <main id="view" class="container main" tabindex="-1"></main>
@@ -196,7 +196,57 @@ function sortedRecipes(a,b){if(recipeSort==='high')return (Number(b.favorite)||0
 function badges(r){return `<div class="badge-row"><span class="tag">${e(r.category||'Autre')}</span>${r.thermomix?'<span class="tag tm">🌀 Thermomix</span>':''}${starText(r.favorite)}${(r.tags||[]).map(t=>`<span class="tag">#${e(t)}</span>`).join('')}</div>`}
 function empty(msg,emoji='🍽️'){return `<div class="empty-state"><span class="emoji">${emoji}</span>${e(msg)}</div>`}
 function weekBase(){return shiftDate(today(),7*weekOffset)}
-function render(){ $$('.tab').forEach(b=>{b.classList.toggle('active',b.dataset.tab===tab);b.setAttribute('aria-current',b.dataset.tab===tab?'page':'false')});if(tab==='week')renderWeek();else if(tab==='recipes')renderRecipes();else if(tab==='shopping')renderShopping();else if(tab==='history')renderHistory();else renderSuggestions() }
+
+// Congelateur : donnees locales independantes du planning, export/import JSON.
+const FREEZER_KEY='menu-congelateur-v1';
+let freezerSearch='',freezerFilter='all',freezerShowZero=true;
+let freezerData=(()=>{try{const x=JSON.parse(localStorage.getItem(FREEZER_KEY));return x&&Array.isArray(x.lots)?x:{version:1,lots:[]}}catch{return {version:1,lots:[]}}})();
+const freezerCategories=['Poisson','Porc','Bœuf','Veau','Agneau','Volaille','Autres viandes','Légumes','Fruits','Plats préparés','Pain et pâtisserie','Autres'];
+function freezerSave(){try{localStorage.setItem(FREEZER_KEY,JSON.stringify(freezerData))}catch{alert('Enregistrement local impossible. Exportez votre inventaire.')}renderFreezer()}
+function freezerUid(){return 'lot-'+Date.now().toString(36)+'-'+Math.random().toString(36).slice(2,9)}
+function freezerLot(x){return {id:String(x.id||freezerUid()),nom:String(x.nom||x.produit||'').trim(),categorie:String(x.categorie||'Autres'),congelateur:String(x.congelateur||'Non précisé'),quantite:Math.max(0,Number(x.quantite??1)||0),unite:String(x.unite||'sachet'),poids_g:x.poids_g==null||x.poids_g===''?null:Number(x.poids_g),date_congelation:String(x.date_congelation||''),notes:String(x.notes||''),historique:Array.isArray(x.historique)?x.historique:[]}}
+function freezerDate(){return new Date().toLocaleDateString('en-CA')}
+function renderFreezer(){
+ const lots=freezerData.lots.map(freezerLot);
+ const groups=[...new Set([...freezerCategories,...lots.map(x=>x.categorie)])];
+ const shown=lots.filter(x=>(freezerShowZero||x.quantite>0)&&(freezerFilter==='all'||x.categorie===freezerFilter)&&norm(x.nom+' '+x.categorie+' '+x.notes).includes(norm(freezerSearch)));
+ const byCat=groups.map(c=>({c,items:shown.filter(x=>x.categorie===c)})).filter(g=>g.items.length);
+ $('#view').innerHTML=`<div class="section-head"><div><div class="eyebrow">Inventaire</div><h2>❄️ Mon congélateur</h2><p class="section-sub">Une ligne par sachet ou ensemble à décongeler en une fois. Les quantités à zéro restent archivées.</p></div></div>
+ <div class="toolbar" style="margin-bottom:14px"><button class="btn btn-primary" data-action="freezer-add">＋ Ajouter manuellement</button><button class="btn" data-action="freezer-import">📂 Importer JSON Grok</button><button class="btn" data-action="freezer-export">⬇ Exporter JSON</button></div>
+ <p class="hint">Les modifications sont enregistrées dans ce navigateur. L'import et l'export permettent d'échanger le fichier avec Grok ; aucune synchronisation automatique avec Drive n'est encore activée.</p>
+ <div class="toolbar" style="margin:16px 0"><input class="searchbar" id="freezer-search" placeholder="Rechercher un produit…" value="${e(freezerSearch)}"><select id="freezer-category"><option value="all">Toutes les catégories</option>${groups.map(c=>`<option value="${e(c)}" ${freezerFilter===c?'selected':''}>${e(c)}</option>`).join('')}</select><label><input type="checkbox" id="freezer-zero" ${freezerShowZero?'checked':''}> Afficher les stocks à zéro</label></div>
+ <div class="stat-row"><span class="stat-pill">${lots.filter(x=>x.quantite>0).length} lots disponibles</span><span class="stat-pill">${lots.filter(x=>x.quantite===0).length} lots à zéro</span></div>
+ ${byCat.length?byCat.map(({c,items})=>`<details class="card" open style="padding:14px;margin:12px 0"><summary style="cursor:pointer;font-weight:800">${e(c)} (${items.length})</summary><div style="display:grid;gap:10px;margin-top:12px">${items.map(x=>`<div style="border-top:1px solid #f7ddca;padding-top:10px;display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap"><div><strong>${e(x.nom)}</strong> ${x.quantite===0?'<small>— stock épuisé</small>':''}<div class="muted">${e(String(x.quantite))} ${e(x.unite)} · ${x.poids_g==null?'Poids non renseigné':e(String(x.poids_g))+' g'} · ${e(x.date_congelation||'Date inconnue')} · ${e(x.congelateur)}</div>${x.notes?`<small>${e(x.notes)}</small>`:''}</div><div class="toolbar"><button class="btn btn-mini" data-action="freezer-minus" data-id="${e(x.id)}" ${x.quantite===0?'disabled':''}>− Retirer 1</button><button class="btn btn-mini" data-action="freezer-edit" data-id="${e(x.id)}">Modifier</button></div></div>`).join('')}</div></details>`).join(''):empty('Aucun produit pour ce filtre.','❄️')}
+ <input type="file" id="freezer-file" accept=".json,application/json" hidden>`;
+}
+function freezerEdit(id){
+ const old=freezerData.lots.find(x=>x.id===id);
+ const name=prompt('Nom du produit :',old?.nom||'');if(name===null||!name.trim())return;
+ const cat=prompt('Catégorie : '+freezerCategories.join(', '),old?.categorie||'Poisson');if(cat===null)return;
+ const fr=prompt('Congélateur (1, 2 ou nom) :',old?.congelateur||'1');if(fr===null)return;
+ const qty=prompt('Nombre de sachets/ensembles (0 possible) :',String(old?.quantite??1));if(qty===null||!Number.isInteger(Number(qty))||Number(qty)<0)return alert('Quantité invalide.');
+ const unit=prompt('Unité (sachet, barquette, portion...) :',old?.unite||'sachet');if(unit===null)return;
+ const weight=prompt('Poids total du sachet en grammes (laisser vide si inconnu) :',old?.poids_g??'');if(weight===null||weight!==''&&(!Number.isFinite(Number(weight))||Number(weight)<0))return alert('Poids invalide.');
+ const date=prompt('Date de congélation AAAA-MM-JJ :',old?.date_congelation||freezerDate());if(date===null||date&&!/^\d{4}-\d{2}-\d{2}$/.test(date))return alert('Date invalide.');
+ const notes=prompt('Notes (facultatif) :',old?.notes||'');if(notes===null)return;
+ const lot=freezerLot({...(old||{}),nom:name,categorie:cat,congelateur:fr,quantite:Number(qty),unite:unit,poids_g:weight===''?null:Number(weight),date_congelation:date,notes});
+ if(old)Object.assign(old,lot);else freezerData.lots.push(lot);
+ freezerSave();
+}
+function freezerExport(){
+ const blob=new Blob([JSON.stringify({...freezerData,version:1,exporte_le:new Date().toISOString()},null,2)],{type:'application/json'});
+ const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='congelateur.json';a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000);
+}
+async function freezerImport(file){
+ if(!file)return;
+ try{const obj=JSON.parse(await file.text());if(!obj||!Array.isArray(obj.lots))throw Error('Le fichier doit contenir un tableau "lots".');
+ const ids=new Set();const lots=obj.lots.map(x=>{const l=freezerLot(x);if(!l.nom)throw Error('Un lot est sans nom.');if(ids.has(l.id))throw Error('Identifiant de lot en double : '+l.id);ids.add(l.id);return l});
+ if(!confirm(`Remplacer l'inventaire local (${freezerData.lots.length} lots) par les ${lots.length} lots du fichier ? Exportez d'abord votre inventaire local si nécessaire.`))return;
+ freezerData={version:1,lots};freezerSave();toast('Inventaire importé.');
+ }catch(err){alert('Import impossible : '+err.message)}
+}
+
+function render(){ $$('.tab').forEach(b=>{b.classList.toggle('active',b.dataset.tab===tab);b.setAttribute('aria-current',b.dataset.tab===tab?'page':'false')});if(tab==='week')renderWeek();else if(tab==='recipes')renderRecipes();else if(tab==='shopping')renderShopping();else if(tab==='history')renderHistory();else if(tab==='freezer')renderFreezer();else renderSuggestions() }
 function displayPeriod(base){return `${fmt(base)} – ${fmt(shiftDate(base,6),{day:'numeric',month:'long',year:'numeric'})}`}
 function combineQuantities(vals){const groups=new Map(),loose=[];for(const raw of vals.filter(Boolean)){const s=String(raw).trim();const m=s.match(/^(\d+(?:[.,]\d+)?)\s*(g|gr|kg|ml|cl|l|pièces?|pcs|tranches?|càs|càc|brins?|pincées?|sachets?|cubes?|gousses?|c\.\s*à\s*s\.|c\.\s*à\s*c\.)?$/i);if(m){const k=norm(m[2]||'unités');groups.set(k,(groups.get(k)||0)+Number(m[1].replace(',','.')))}else if(!loose.includes(s))loose.push(s)}return [...[...groups].map(([unit,n])=>`${Number(n.toFixed(2))}${unit==='unités'?'':` ${unit}`}`),...loose].join(' + ')}
 function dedupIngredients(rs){const m=new Map();for(const r of rs)for(const ing of ingredientArray(r)){if(!ing?.name)continue;const k=norm(ing.name);if(!m.has(k))m.set(k,{name:ing.name,quantities:[]});if(ing.qty)m.get(k).quantities.push(ing.qty)}return [...m.values()].sort((a,b)=>a.name.localeCompare(b.name,'fr')).map(x=>({name:x.name,qty:combineQuantities(x.quantities)}))}
@@ -319,9 +369,9 @@ function handleAction(b){const a=b.dataset.action,id=b.dataset.id,day=b.dataset.
  else if(a==='choose-alternative')chooseAlternative(id,b.dataset.group,b.dataset.choice,day,slot,Number(b.dataset.parts));
  else if(a==='drive-login')driveRequestToken();else if(a==='share-shop')shareShopping();else if(a==='export-json')exportJson();else if(a==='import-json')$('#json-file').click();
  else if(a==='suggest-slot'){const d=today();if(state.planning[d]?.[slot]&&!confirm(`Remplacer le repas déjà prévu pour ${slot} aujourd’hui ?`))return;setPlan(d,slot,id);tab='week';weekOffset=0;render()}}
-document.addEventListener('click',ev=>{const b=ev.target.closest('[data-action]');if(b){if(b.matches('input[type=checkbox]'))return;ev.preventDefault();handleAction(b);return}if(ev.target.classList.contains('modal-wrap'))closeModal();const t=ev.target.closest('[data-tab]');if(t){tab=t.dataset.tab;render();$('#view').focus({preventScroll:true})}});
-document.addEventListener('change',ev=>{if(ev.target.id==='recipe-sort'){recipeSort=ev.target.value;localStorage.setItem('menu-recipe-sort',recipeSort);renderRecipeList()}else if(ev.target.id==='recipe-category'){recipeCategory=ev.target.value;localStorage.setItem('menu-recipe-category',recipeCategory);renderRecipeList()}else if(ev.target.id==='shop-view'){shopView=ev.target.value;renderShopping()}else if(ev.target.id==='shop-week'){selectedShopWeek=Number(ev.target.value);renderShopping()}else if(ev.target.matches('[data-week-check]')){state.shopping.weekChecks??={};state.shopping.weekChecks[ev.target.dataset.weekCheck]=ev.target.checked;commit('Courses mises à jour.')}else if(ev.target.id==='shopping-sort'){shopSort=ev.target.value;renderShopping()}else if(ev.target.matches('[data-action="toggle-item"]')){const x=state.shopping.items.find(i=>i.id===ev.target.dataset.id);if(x){x.checked=ev.target.checked;commit(x.checked?'Article coché.':'Article décoché.')}}else if(ev.target.id==='json-file'){importJson(ev.target.files?.[0]);ev.target.value=''}else if(ev.target.id==='grok-file-input'){importGrokFiles([...ev.target.files]);ev.target.value=''}});
-document.addEventListener('input',ev=>{if(ev.target.id==='recipe-search'){query=ev.target.value;renderRecipeList()}});
+document.addEventListener('click',ev=>{const b=ev.target.closest('[data-action]');if(b&&b.dataset.action?.startsWith('freezer-')){ev.preventDefault();const a=b.dataset.action,id=b.dataset.id;if(a==='freezer-add'||a==='freezer-edit')freezerEdit(id);else if(a==='freezer-export')freezerExport();else if(a==='freezer-import')$('#freezer-file').click();else if(a==='freezer-minus'){const lot=freezerData.lots.find(x=>x.id===id);if(lot&&lot.quantite>0&&confirm('Retirer une unité de '+lot.nom+' ?')){lot.quantite--;lot.historique??=[];lot.historique.push({action:'retrait',quantite:1,date:new Date().toISOString(),source:'manuel'});freezerSave()}}return}const b2=null;if(b){if(b.matches('input[type=checkbox]'))return;ev.preventDefault();handleAction(b);return}if(ev.target.classList.contains('modal-wrap'))closeModal();const t=ev.target.closest('[data-tab]');if(t){tab=t.dataset.tab;render();$('#view').focus({preventScroll:true})}});
+document.addEventListener('change',ev=>{if(ev.target.id==='freezer-file'){freezerImport(ev.target.files?.[0]);ev.target.value='';return}if(ev.target.id==='freezer-category'){freezerFilter=ev.target.value;renderFreezer();return}if(ev.target.id==='freezer-zero'){freezerShowZero=ev.target.checked;renderFreezer();return}if(ev.target.id==='recipe-sort'){recipeSort=ev.target.value;localStorage.setItem('menu-recipe-sort',recipeSort);renderRecipeList()}else if(ev.target.id==='recipe-category'){recipeCategory=ev.target.value;localStorage.setItem('menu-recipe-category',recipeCategory);renderRecipeList()}else if(ev.target.id==='shop-view'){shopView=ev.target.value;renderShopping()}else if(ev.target.id==='shop-week'){selectedShopWeek=Number(ev.target.value);renderShopping()}else if(ev.target.matches('[data-week-check]')){state.shopping.weekChecks??={};state.shopping.weekChecks[ev.target.dataset.weekCheck]=ev.target.checked;commit('Courses mises à jour.')}else if(ev.target.id==='shopping-sort'){shopSort=ev.target.value;renderShopping()}else if(ev.target.matches('[data-action="toggle-item"]')){const x=state.shopping.items.find(i=>i.id===ev.target.dataset.id);if(x){x.checked=ev.target.checked;commit(x.checked?'Article coché.':'Article décoché.')}}else if(ev.target.id==='json-file'){importJson(ev.target.files?.[0]);ev.target.value=''}else if(ev.target.id==='grok-file-input'){importGrokFiles([...ev.target.files]);ev.target.value=''}});
+document.addEventListener('input',ev=>{if(ev.target.id==='freezer-search'){freezerSearch=ev.target.value;const pos=ev.target.selectionStart;renderFreezer();const el=$('#freezer-search');el.focus();el.setSelectionRange(pos,pos);return}if(ev.target.id==='recipe-search'){query=ev.target.value;renderRecipeList()}});
 // Bandeau mobile : deux seuils distincts evitent les boucles de mise en page.
 // Ne pas basculer selon la direction instantanee : la reduction de hauteur
 // modifie elle-meme scrollY et faisait clignoter le bandeau.
